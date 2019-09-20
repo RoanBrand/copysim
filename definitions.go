@@ -19,6 +19,11 @@ func (cp *copyPortfolio) init() {
 	}
 }
 
+func (cp *copyPortfolio) joinNewFollower() int {
+	cp.followers = append(cp.followers, trader{openTrades: make(map[string]decimal.Decimal)})
+	return len(cp.followers) - 1
+}
+
 func (cp *copyPortfolio) String() string {
 	lTotal := cp.leader.calcTotalPortValue()
 	s := strings.Builder{}
@@ -31,10 +36,16 @@ func (cp *copyPortfolio) String() string {
 	w.Write([]byte("\t(%P: "))
 	w.Write([]byte((cp.leader.baseCurrency.Div(lTotal).Mul(decimal.New(100, 0))).StringFixedBank(2)))
 
-	w.Write([]byte(")\t BTC:\t"))
-	w.Write([]byte(cp.leader.openTrades["btc"].StringFixedBank(2)))
-	w.Write([]byte("\t(%P: "))
-	w.Write([]byte((cp.leader.openTrades["btc"].Mul(marketPrices["btc"]).Div(lTotal).Mul(decimal.New(100, 0))).StringFixedBank(2)))
+	for _, name := range order {
+		w.Write([]byte(")\t " + strings.ToUpper(name) + ":\t"))
+		if amount, ok := cp.leader.openTrades[name]; ok {
+			w.Write([]byte(amount.StringFixedBank(2)))
+			w.Write([]byte("\t(%P: "))
+			w.Write([]byte((amount.Mul(marketPrices[name]).Div(lTotal).Mul(decimal.New(100, 0))).StringFixedBank(2)))
+		} else {
+			w.Write([]byte("0.00\t(%P: 0.00"))
+		}
+	}
 
 	w.Write([]byte(")\n"))
 	for i := range cp.followers {
@@ -49,10 +60,16 @@ func (cp *copyPortfolio) String() string {
 		w.Write([]byte("\t(%P: "))
 		w.Write([]byte((f.baseCurrency.Div(fTotal).Mul(decimal.New(100, 0))).StringFixedBank(2)))
 
-		w.Write([]byte(")\t BTC:\t"))
-		w.Write([]byte(f.openTrades["btc"].StringFixedBank(2)))
-		w.Write([]byte("\t(%P: "))
-		w.Write([]byte((f.openTrades["btc"].Mul(marketPrices["btc"]).Div(fTotal).Mul(decimal.New(100, 0))).StringFixedBank(2)))
+		for _, name := range order {
+			w.Write([]byte(")\t " + strings.ToUpper(name) + ":\t"))
+			if amount, ok := f.openTrades[name]; ok {
+				w.Write([]byte(amount.StringFixedBank(2)))
+				w.Write([]byte("\t(%P: "))
+				w.Write([]byte((amount.Mul(marketPrices[name]).Div(fTotal).Mul(decimal.New(100, 0))).StringFixedBank(2)))
+			} else {
+				w.Write([]byte("0.00\t(%P: 0.00"))
+			}
+		}
 
 		w.Write([]byte(")\n"))
 	}
@@ -64,7 +81,6 @@ type trader struct {
 	baseCurrency decimal.Decimal
 	openTrades   map[string]decimal.Decimal
 }
-
 
 // Calculates and return total portfolio value of trader, calculated in base currency.
 func (t *trader) calcTotalPortValue() decimal.Decimal {
