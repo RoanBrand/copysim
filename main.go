@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
+	"math/rand"
+
 	"github.com/shopspring/decimal"
 )
 
@@ -29,7 +31,55 @@ func main() {
 	fmt.Println("Portfolio Start:")
 	fmt.Println(&cp)
 
-	if err := cp.leaderBuy("btc", decimal.NewFromFloat(0.5)); err != nil {
+	per := decimal.New(100, 0)
+
+	for cnt := 0; cnt < 100; cnt++ {
+		if cnt == 30 {
+			nf := cp.joinNewFollower()
+			cp.followerDepositBase(nf, decimal.New(rand.Int63n(10000)+10, 0))
+		} else if cnt == 60 {
+			nf := cp.joinNewFollower()
+			cp.followerDepositBase(nf, decimal.New(rand.Int63n(10000)+10, 0))
+		}
+		fmt.Println(&cp)
+		if flipCoin() { // buy
+			if flipCoin() { // btc
+				canBuy := cp.leader.baseCurrency.Div(marketPrices["btc"]).Div(fee)
+				if err := cp.leaderBuy("btc", decimal.NewFromFloat(float64(rand.Intn(100))).Mul(canBuy).Div(per)); err != nil {
+					panic(err)
+				}
+			} else { // eth
+				canBuy := cp.leader.baseCurrency.Div(marketPrices["eth"]).Div(fee)
+				if err := cp.leaderBuy("eth", decimal.NewFromFloat(float64(rand.Intn(100))).Mul(canBuy).Div(per)); err != nil {
+					panic(err)
+				}
+			}
+		} else { // sell
+			if flipCoin() { // btc
+				canSell := cp.leader.openTrades["btc"]
+				if canSell.IsZero() {
+					continue
+				}
+				if err := cp.leaderSell("btc", decimal.NewFromFloat(float64(rand.Intn(100))).Mul(canSell).Div(per)); err != nil {
+					panic(err)
+				}
+			} else { // eth
+				canSell := cp.leader.openTrades["eth"]
+				if canSell.IsZero() {
+					continue
+				}
+				if err := cp.leaderSell("eth", decimal.NewFromFloat(float64(rand.Intn(100))).Mul(canSell).Div(per)); err != nil {
+					panic(err)
+				}
+			}
+		}
+
+		marketPrices["btc"] = marketPrices["btc"].Mul(decimal.New(9995+rand.Int63n(10), 0).Div(decimal.New(10000, 0)))
+		marketPrices["eth"] = marketPrices["eth"].Mul(decimal.New(9995+rand.Int63n(10), 0).Div(decimal.New(10000, 0)))
+	}
+	fmt.Println(&cp)
+
+	/*if err := cp.leaderBuy("btc", decimal.NewFromFloat(0.5)); err != nil {
 		panic(err)
 	}
 
@@ -73,7 +123,7 @@ func main() {
 	fmt.Println("ETH Price changes to", marketPrices["eth"].StringFixedBank(2), ":")
 	fmt.Println(&cp)
 
-	fmt.Println("Looks like model hold, i.e. %P of leader in base always less or equal to that of any follower")
+	fmt.Println("Looks like model holds, i.e. %P of leader in base always less or equal to that of any follower")*/
 }
 
 func (cp *copyPortfolio) leaderDepositBase(amount decimal.Decimal) {
@@ -141,4 +191,9 @@ func (cp *copyPortfolio) followersCopySell(asset string, fracOfTotalAssetSold de
 	}
 
 	return nil
+}
+
+func flipCoin() bool {
+	r := rand.Intn(10000)
+	return r > 5000
 }
