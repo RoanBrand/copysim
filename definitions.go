@@ -14,14 +14,14 @@ type copyPortfolio struct {
 }
 
 func (cp *copyPortfolio) init() {
-	cp.leader.openTrades = make(map[string]openTrade)
+	cp.leader.openTrades = make(map[string]*openTrade)
 	for i := range cp.followers {
-		cp.followers[i].openTrades = make(map[string]openTrade)
+		cp.followers[i].openTrades = make(map[string]*openTrade)
 	}
 }
 
 func (cp *copyPortfolio) joinNewFollower() int {
-	cp.followers = append(cp.followers, trader{openTrades: make(map[string]openTrade)})
+	cp.followers = append(cp.followers, trader{openTrades: make(map[string]*openTrade)})
 	return len(cp.followers) - 1
 }
 
@@ -40,7 +40,7 @@ func (cp *copyPortfolio) String() string {
 	for _, name := range order {
 		w.Write([]byte(")\t " + strings.ToUpper(name) + ":\t"))
 		if trade, ok := cp.leader.openTrades[name]; ok {
-			w.Write([]byte(trade.amount.StringFixedBank(2)))
+			w.Write([]byte(trade.amount.StringFixedBank(8)))
 			w.Write([]byte("\t(%P: "))
 			w.Write([]byte((trade.amount.Mul(marketPrices[name]).Div(lTotal).Mul(decimal.New(100, 0))).StringFixedBank(2)))
 		} else {
@@ -64,7 +64,7 @@ func (cp *copyPortfolio) String() string {
 		for _, name := range order {
 			w.Write([]byte(")\t " + strings.ToUpper(name) + ":\t"))
 			if trade, ok := f.openTrades[name]; ok {
-				w.Write([]byte(trade.amount.StringFixedBank(2)))
+				w.Write([]byte(trade.amount.StringFixedBank(8)))
 				w.Write([]byte("\t(%P: "))
 				w.Write([]byte((trade.amount.Mul(marketPrices[name]).Div(fTotal).Mul(decimal.New(100, 0))).StringFixedBank(2)))
 			} else {
@@ -80,7 +80,7 @@ func (cp *copyPortfolio) String() string {
 
 type trader struct {
 	baseCurrency decimal.Decimal
-	openTrades   map[string]openTrade
+	openTrades   map[string]*openTrade
 }
 
 type openTrade struct {
@@ -107,20 +107,20 @@ func (t *trader) buy(asset string, amount, totalCost decimal.Decimal) {
 		return
 	}
 
-	assetPrice := totalCost.Div(amount)
+	assetPrice := marketPrices[asset]
 	t.baseCurrency = t.baseCurrency.Sub(totalCost)
 	if trade, ok := t.openTrades[asset]; ok {
-		trade.amount.Add(amount)
+		trade.amount = trade.amount.Add(amount)
 		trade.entryPrice = assetPrice
 	} else {
-		t.openTrades[asset] = openTrade{entryPrice: assetPrice, amount: amount}
+		t.openTrades[asset] = &openTrade{entryPrice: assetPrice, amount: amount}
 	}
 }
 
 // Low-level sell func
 func (t *trader) sell(asset string, amount decimal.Decimal) {
 	openTrade := t.openTrades[asset]
-	openTrade.amount = t.openTrades[asset].amount.Sub(amount)
+	openTrade.amount = openTrade.amount.Sub(amount)
 	got := amount.Mul(marketPrices[asset])
 	proceeds := got.Sub(got.Mul(fee.Sub(decimal.New(1, 0))))
 

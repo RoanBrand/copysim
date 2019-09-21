@@ -45,31 +45,46 @@ func main() {
 		if flipCoin() { // buy
 			if flipCoin() { // btc
 				canBuy := cp.leader.baseCurrency.Div(marketPrices["btc"]).Div(fee)
-				if err := cp.leaderBuy("btc", decimal.NewFromFloat(float64(rand.Intn(100))).Mul(canBuy).Div(per)); err != nil {
+				toBuy := decimal.NewFromFloat(float64(rand.Intn(100))).Mul(canBuy).Div(per)
+				fmt.Println("Leader buying", toBuy.StringFixedBank(6), "BTC @", marketPrices["btc"].StringFixedBank(2), ":")
+				if err := cp.leaderBuy("btc", toBuy); err != nil {
 					panic(err)
 				}
 			} else { // eth
 				canBuy := cp.leader.baseCurrency.Div(marketPrices["eth"]).Div(fee)
-				if err := cp.leaderBuy("eth", decimal.NewFromFloat(float64(rand.Intn(100))).Mul(canBuy).Div(per)); err != nil {
+				toBuy := decimal.NewFromFloat(float64(rand.Intn(100))).Mul(canBuy).Div(per)
+				fmt.Println("Leader buying", toBuy.StringFixedBank(6), "ETH @", marketPrices["eth"].StringFixedBank(2), ":")
+				if err := cp.leaderBuy("eth", toBuy); err != nil {
 					panic(err)
 				}
 			}
 		} else { // sell
 			if flipCoin() { // btc
-				canSell := cp.leader.openTrades["btc"].amount
-				if canSell.IsZero() {
-					continue
+				if oT, ok := cp.leader.openTrades["btc"]; ok {
+					canSell := oT.amount
+					if canSell.IsZero() {
+						continue
+					}
+
+					toSell := decimal.NewFromFloat(float64(rand.Intn(100))).Mul(canSell).Div(per)
+					fmt.Println("Leader selling", toSell.StringFixedBank(6), "BTC @", marketPrices["btc"].StringFixedBank(2), ":")
+					if err := cp.leaderSell("btc", toSell); err != nil {
+						panic(err)
+					}
 				}
-				if err := cp.leaderSell("btc", decimal.NewFromFloat(float64(rand.Intn(100))).Mul(canSell).Div(per)); err != nil {
-					panic(err)
-				}
+
 			} else { // eth
-				canSell := cp.leader.openTrades["eth"].amount
-				if canSell.IsZero() {
-					continue
-				}
-				if err := cp.leaderSell("eth", decimal.NewFromFloat(float64(rand.Intn(100))).Mul(canSell).Div(per)); err != nil {
-					panic(err)
+				if oT, ok := cp.leader.openTrades["eth"]; ok {
+					canSell := oT.amount
+					if canSell.IsZero() {
+						continue
+					}
+
+					toSell := decimal.NewFromFloat(float64(rand.Intn(100))).Mul(canSell).Div(per)
+					fmt.Println("Leader selling", toSell.StringFixedBank(6), "ETH @", marketPrices["eth"].StringFixedBank(2), ":")
+					if err := cp.leaderSell("eth", toSell); err != nil {
+						panic(err)
+					}
 				}
 			}
 		}
@@ -183,11 +198,14 @@ func (cp *copyPortfolio) followersCopyBuy(asset string, fracOfTotalPortfolioValu
 func (cp *copyPortfolio) followersCopySell(asset string, fracOfTotalAssetSold decimal.Decimal) error {
 	for i := range cp.followers {
 		f := &cp.followers[i]
-		amountToSell := f.openTrades[asset].amount.Mul(fracOfTotalAssetSold)
-		if amountToSell.Equal(decimal.Zero) {
-			continue // if follower didn't copy an open trade, there is nothing to sell
+
+		if oT, ok := f.openTrades[asset]; ok {
+			amountToSell := oT.amount.Mul(fracOfTotalAssetSold)
+			if amountToSell.IsZero() {
+				continue // if follower didn't copy an open trade, there is nothing to sell
+			}
+			f.sell(asset, amountToSell)
 		}
-		f.sell(asset, amountToSell)
 	}
 
 	return nil
