@@ -1,6 +1,7 @@
 package main
 
 import (
+	"container/list"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -14,35 +15,35 @@ type copyPortfolio struct {
 }
 
 func (cp *copyPortfolio) init() {
-	cp.leader.openTrades = make(map[string]*openTrade)
+	cp.leader.positions = make(map[string]*position)
 	for i := range cp.followers {
-		cp.followers[i].openTrades = make(map[string]*openTrade)
+		cp.followers[i].positions = make(map[string]*position)
 	}
 }
 
 func (cp *copyPortfolio) joinNewFollower() int {
-	cp.followers = append(cp.followers, trader{openTrades: make(map[string]*openTrade)})
+	cp.followers = append(cp.followers, trader{positions: make(map[string]*position)})
 	return len(cp.followers) - 1
 }
 
 func (cp *copyPortfolio) String() string {
 	lTotal := cp.leader.calcTotalPortValue()
 	s := strings.Builder{}
-	w := tabwriter.NewWriter(&s, 12, 16, 0, ' ', 0)
+	w := tabwriter.NewWriter(&s, 16, 24, 0, ' ', 0)
 
 	w.Write([]byte("Leader:\n"))
 
 	w.Write([]byte("Base:\t "))
 	w.Write([]byte(cp.leader.baseCurrency.StringFixedBank(2)))
 	w.Write([]byte("\t(%P: "))
-	w.Write([]byte((cp.leader.baseCurrency.Div(lTotal).Mul(decimal.New(100, 0))).StringFixedBank(2)))
+	w.Write([]byte((cp.leader.baseCurrency.Div(lTotal).Mul(decimal.New(100, 0))).StringFixedBank(4)))
 
 	for _, name := range order {
 		w.Write([]byte(")\t " + strings.ToUpper(name) + ":\t"))
-		if trade, ok := cp.leader.openTrades[name]; ok {
-			w.Write([]byte(trade.amount.StringFixedBank(8)))
+		if trade, ok := cp.leader.positions[name]; ok {
+			w.Write([]byte(trade.totalAmount.StringFixedBank(8)))
 			w.Write([]byte("\t(%P: "))
-			w.Write([]byte((trade.amount.Mul(marketPrices[name]).Div(lTotal).Mul(decimal.New(100, 0))).StringFixedBank(2)))
+			w.Write([]byte((trade.totalAmount.Mul(marketPrices[name]).Div(lTotal).Mul(decimal.New(100, 0))).StringFixedBank(4)))
 		} else {
 			w.Write([]byte("0.00\t(%P: 0.00"))
 		}
@@ -59,14 +60,14 @@ func (cp *copyPortfolio) String() string {
 		w.Write([]byte("Base:\t "))
 		w.Write([]byte(f.baseCurrency.StringFixedBank(2)))
 		w.Write([]byte("\t(%P: "))
-		w.Write([]byte((f.baseCurrency.Div(fTotal).Mul(decimal.New(100, 0))).StringFixedBank(2)))
+		w.Write([]byte((f.baseCurrency.Div(fTotal).Mul(decimal.New(100, 0))).StringFixedBank(4)))
 
 		for _, name := range order {
 			w.Write([]byte(")\t " + strings.ToUpper(name) + ":\t"))
-			if trade, ok := f.openTrades[name]; ok {
-				w.Write([]byte(trade.amount.StringFixedBank(8)))
+			if trade, ok := f.positions[name]; ok {
+				w.Write([]byte(trade.totalAmount.StringFixedBank(8)))
 				w.Write([]byte("\t(%P: "))
-				w.Write([]byte((trade.amount.Mul(marketPrices[name]).Div(fTotal).Mul(decimal.New(100, 0))).StringFixedBank(2)))
+				w.Write([]byte((trade.totalAmount.Mul(marketPrices[name]).Div(fTotal).Mul(decimal.New(100, 0))).StringFixedBank(4)))
 			} else {
 				w.Write([]byte("0.00\t(%P: 0.00"))
 			}
@@ -80,20 +81,25 @@ func (cp *copyPortfolio) String() string {
 
 type trader struct {
 	baseCurrency decimal.Decimal
-	openTrades   map[string]*openTrade
+	positions    map[string]*position
 }
 
-type openTrade struct {
-	entryPrice decimal.Decimal
-	amount     decimal.Decimal
+type position struct {
+	totalAmount decimal.Decimal
+	buys        *list.List
+}
+
+type buy struct {
+	price  decimal.Decimal
+	amount decimal.Decimal
 }
 
 // Calculates and return total portfolio value of trader, calculated in base currency.
 func (t *trader) calcTotalPortValue() decimal.Decimal {
 	total := t.baseCurrency
-	for name, trade := range t.openTrades {
+	for name, pos := range t.positions {
 		if price, ok := marketPrices[name]; ok {
-			total = total.Add(trade.amount.Mul(price))
+			total = total.Add(pos.totalAmount.Mul(price))
 		} else {
 			panic("no price for asset " + name)
 		}
@@ -107,29 +113,50 @@ func (t *trader) buy(asset string, amount, totalCost decimal.Decimal) {
 		return
 	}
 
-	assetPrice := marketPrices[asset]
+	currentPrice := marketPrices[asset]
 	t.baseCurrency = t.baseCurrency.Sub(totalCost)
-	if trade, ok := t.openTrades[asset]; ok {
-		trade.amount = trade.amount.Add(amount)
-		trade.entryPrice = assetPrice
+	if pos, ok := t.positions[asset]; ok {
+		pos.totalAmount = pos.totalAmount.Add(amount)
+		pos.buys.PushBack(&buy{price: currentPrice, amount: amount})
 	} else {
-		t.openTrades[asset] = &openTrade{entryPrice: assetPrice, amount: amount}
+		t.positions[asset] = &position{totalAmount: amount, buys: list.New()}
+		t.positions[asset].buys.PushBack(&buy{price: currentPrice, amount: amount})
 	}
 }
 
 // Low-level sell func
 func (t *trader) sell(asset string, amount decimal.Decimal) {
-	openTrade := t.openTrades[asset]
-	openTrade.amount = openTrade.amount.Sub(amount)
-	got := amount.Mul(marketPrices[asset])
+	pos := t.positions[asset]
+
+	toSell, currentPrice := amount, marketPrices[asset]
+	var profit decimal.Decimal
+	for b := pos.buys.Front(); b != nil; b = b.Next() {
+		bu := b.Value.(*buy)
+
+		if toSell.LessThanOrEqual(bu.amount) {
+			cost, got := toSell.Mul(bu.price), toSell.Mul(currentPrice)
+			profit = profit.Add(got.Sub(cost))
+			bu.amount = bu.amount.Sub(toSell)
+			break
+		} else { // have to close this buy and move on to next
+			cost, got := bu.amount.Mul(bu.price), bu.amount.Mul(currentPrice)
+			profit = profit.Add(got.Sub(cost))
+			toSell = toSell.Sub(bu.amount)
+			pos.buys.Remove(b)
+		}
+	}
+
+	pos.totalAmount = pos.totalAmount.Sub(amount)
+	got := amount.Mul(currentPrice)
 	proceeds := got.Sub(got.Mul(fee.Sub(decimal.New(1, 0))))
 
-	cost := openTrade.entryPrice.Mul(openTrade.amount)
-	profit := proceeds.Sub(cost)
-
-	// share % of profit with leader
+	// share % of profit with leader if > 0, take from follower base
 	// Assume follower profit split is 80F/20L
-	leaderShare := profit.Mul(decimal.NewFromFloat(0.2))
+	if profit.GreaterThan(decimal.Zero) {
+		leaderShare := profit.Mul(decimal.NewFromFloat(0.2))
+		t.baseCurrency = t.baseCurrency.Add(proceeds.Sub(leaderShare))
+	} else {
+		t.baseCurrency = t.baseCurrency.Add(proceeds)
+	}
 
-	t.baseCurrency = t.baseCurrency.Add(proceeds.Sub(leaderShare))
 }
