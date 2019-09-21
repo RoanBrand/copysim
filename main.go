@@ -56,7 +56,7 @@ func main() {
 			}
 		} else { // sell
 			if flipCoin() { // btc
-				canSell := cp.leader.openTrades["btc"]
+				canSell := cp.leader.openTrades["btc"].amount
 				if canSell.IsZero() {
 					continue
 				}
@@ -64,7 +64,7 @@ func main() {
 					panic(err)
 				}
 			} else { // eth
-				canSell := cp.leader.openTrades["eth"]
+				canSell := cp.leader.openTrades["eth"].amount
 				if canSell.IsZero() {
 					continue
 				}
@@ -150,12 +150,12 @@ func (cp *copyPortfolio) leaderBuy(asset string, amount decimal.Decimal) error {
 }
 
 func (cp *copyPortfolio) leaderSell(asset string, amount decimal.Decimal) error {
-	if amount.GreaterThan(cp.leader.openTrades[asset]) {
+	if amount.GreaterThan(cp.leader.openTrades[asset].amount) {
 		return errInsufficientFunds
 	}
 
 	// Calc fraction of asset that is being closed of entire asset position
-	frac := amount.Div(cp.leader.openTrades[asset])
+	frac := amount.Div(cp.leader.openTrades[asset].amount)
 
 	cp.leader.sell(asset, amount)
 	return cp.followersCopySell(asset, frac)
@@ -183,7 +183,7 @@ func (cp *copyPortfolio) followersCopyBuy(asset string, fracOfTotalPortfolioValu
 func (cp *copyPortfolio) followersCopySell(asset string, fracOfTotalAssetSold decimal.Decimal) error {
 	for i := range cp.followers {
 		f := &cp.followers[i]
-		amountToSell := f.openTrades[asset].Mul(fracOfTotalAssetSold)
+		amountToSell := f.openTrades[asset].amount.Mul(fracOfTotalAssetSold)
 		if amountToSell.Equal(decimal.Zero) {
 			continue // if follower didn't copy an open trade, there is nothing to sell
 		}
