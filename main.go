@@ -49,14 +49,14 @@ func main() {
 				if err := cp.leaderBuy("btc", toBuy); err != nil {
 					panic(err)
 				}
-			} else { // eth
+			} /*else { // eth
 				canBuy := cp.leader.baseCurrency.Div(marketPrices["eth"]).Div(fee)
 				toBuy := decimal.New(rand.Int63n(100), 0).Mul(canBuy).Div(per).Truncate(8)
 				fmt.Println("Leader buying", toBuy.StringFixedBank(8), "ETH. Market Prices: BTC:", marketPrices["btc"].StringFixedBank(2), "ETH:", marketPrices["eth"].StringFixedBank(2), ":")
 				if err := cp.leaderBuy("eth", toBuy); err != nil {
 					panic(err)
 				}
-			}
+			}*/
 		} else { // sell
 			if flipCoin() { // btc
 				if oT, ok := cp.leader.positions["btc"]; ok {
@@ -72,7 +72,7 @@ func main() {
 					}
 				}
 
-			} else { // eth
+			} /*else { // eth
 				if oT, ok := cp.leader.positions["eth"]; ok {
 					canSell := oT.totalAmount
 					if canSell.IsZero() {
@@ -85,7 +85,7 @@ func main() {
 						panic(err)
 					}
 				}
-			}
+			}*/
 		}
 
 		marketPrices["btc"] = marketPrices["btc"].Mul(decimal.New(9995+rand.Int63n(10), 0).Div(decimal.New(10000, 0))).Truncate(4)
@@ -233,12 +233,26 @@ func (cp *copyPortfolio) followersCopySell(asset string, fracOfTotalAssetSold de
 		if oT, ok := f.positions[asset]; ok && !oT.totalAmount.IsZero() {
 			amountToSell := oT.totalAmount.Mul(fracOfTotalAssetSold)
 			fGains := f.sell(asset, amountToSell)
+			fmt.Println("follower gains:", fGains)
 			if fGains.GreaterThan(decimal.Zero) {
 				// share % of profit with leader if > 0, take from follower base
 				// Assume follower profit split is 80F/20L
 				leaderShare := fGains.Mul(decimal.New(2, -1))
 				// TODO: uncommenting the following breaks the follower's ratios. need to take profit both from asset and base
-				// f.baseCurrency = f.baseCurrency.Sub(leaderShare)
+				half := leaderShare.Mul(decimal.New(5, -1))
+
+				fmt.Println("leadershare:", leaderShare)
+				fmt.Println("leadershare half:", half)
+
+				fmt.Println("taking", half.Truncate(8), "from base")
+				fmt.Println("taking", leaderShare.Sub(half.Truncate(8)).Div(marketPrices[asset]), "from asset")
+
+				oT.totalAmount = oT.totalAmount.Sub(leaderShare.Sub(half.Truncate(8)).Div(marketPrices[asset]))
+
+				f.baseCurrency = f.baseCurrency.Sub(half.Truncate(8))
+
+
+
 				leaderProfit = leaderProfit.Add(leaderShare)
 			}
 		}
