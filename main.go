@@ -233,25 +233,16 @@ func (cp *copyPortfolio) followersCopySell(asset string, fracOfTotalAssetSold de
 		if oT, ok := f.positions[asset]; ok && !oT.totalAmount.IsZero() {
 			amountToSell := oT.totalAmount.Mul(fracOfTotalAssetSold)
 			fGains := f.sell(asset, amountToSell)
-			fmt.Println("follower gains:", fGains)
-			if fGains.GreaterThan(decimal.Zero) {
-				// share % of profit with leader if > 0, take from follower base
+			if fGains.GreaterThan(decimal.Zero) { // share % of profit with leader if > 0
+
 				// Assume follower profit split is 80F/20L
 				leaderShare := fGains.Mul(decimal.New(2, -1))
-				// TODO: uncommenting the following breaks the follower's ratios. need to take profit both from asset and base
-				half := leaderShare.Mul(decimal.New(5, -1))
 
-				fmt.Println("leadershare:", leaderShare)
-				fmt.Println("leadershare half:", half)
+				// calc what to take from follower base and asset
+				ratio := oT.totalAmount.Mul(marketPrices[asset]).Div(f.calcTotalPortValue())
 
-				fmt.Println("taking", half.Truncate(8), "from base")
-				fmt.Println("taking", leaderShare.Sub(half.Truncate(8)).Div(marketPrices[asset]), "from asset")
-
-				oT.totalAmount = oT.totalAmount.Sub(leaderShare.Sub(half.Truncate(8)).Div(marketPrices[asset]))
-
-				f.baseCurrency = f.baseCurrency.Sub(half.Truncate(8))
-
-
+				oT.totalAmount = oT.totalAmount.Sub(ratio.Mul(leaderShare).Div(marketPrices[asset]))
+				f.baseCurrency = f.baseCurrency.Sub((decimal.New(1, 0).Sub(ratio)).Mul(leaderShare))
 
 				leaderProfit = leaderProfit.Add(leaderShare)
 			}
