@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/shopspring/decimal"
 	"math/rand"
-	"strconv"
 	"time"
 )
 
@@ -37,6 +36,7 @@ func main() {
 	fmt.Println(&cp)
 
 	per := decimal.New(100, 0)
+	var totalProfitMade decimal.Decimal
 
 	iterations := 500
 	for cnt := 0; cnt < iterations; cnt++ {
@@ -49,14 +49,14 @@ func main() {
 				if err := cp.leaderBuy("btc", toBuy); err != nil {
 					panic(err)
 				}
-			} /*else { // eth
+			} else { // eth
 				canBuy := cp.leader.baseCurrency.Div(marketPrices["eth"]).Div(fee)
 				toBuy := decimal.New(rand.Int63n(100), 0).Mul(canBuy).Div(per).Truncate(8)
 				fmt.Println("Leader buying", toBuy.StringFixedBank(8), "ETH. Market Prices: BTC:", marketPrices["btc"].StringFixedBank(2), "ETH:", marketPrices["eth"].StringFixedBank(2), ":")
 				if err := cp.leaderBuy("eth", toBuy); err != nil {
 					panic(err)
 				}
-			}*/
+			}
 		} else { // sell
 			if flipCoin() { // btc
 				if oT, ok := cp.leader.positions["btc"]; ok {
@@ -67,12 +67,18 @@ func main() {
 
 					toSell := decimal.New(rand.Int63n(100), 0).Mul(canSell).Div(per).Truncate(8)
 					fmt.Println("Leader selling", toSell.StringFixedBank(8), "BTC. Market Prices: BTC:", marketPrices["btc"].StringFixedBank(2), "ETH:", marketPrices["eth"].StringFixedBank(2), ":")
-					if err := cp.leaderSell("btc", toSell); err != nil {
+					profitFromSharing, err := cp.leaderSell("btc", toSell)
+					if err != nil {
 						panic(err)
+					}
+
+					if profitFromSharing.GreaterThan(decimal.Zero) {
+						fmt.Println("Leader gets ", profitFromSharing.StringFixedBank(8), " shared profit for this sell")
+						totalProfitMade = totalProfitMade.Add(profitFromSharing)
 					}
 				}
 
-			} /*else { // eth
+			} else { // eth
 				if oT, ok := cp.leader.positions["eth"]; ok {
 					canSell := oT.totalAmount
 					if canSell.IsZero() {
@@ -81,11 +87,17 @@ func main() {
 
 					toSell := decimal.New(rand.Int63n(100), 0).Mul(canSell).Div(per).Truncate(8)
 					fmt.Println("Leader selling", toSell.StringFixedBank(8), "ETH. Market Prices: BTC:", marketPrices["btc"].StringFixedBank(2), "ETH:", marketPrices["eth"].StringFixedBank(2), ":")
-					if err := cp.leaderSell("eth", toSell); err != nil {
+					profitFromSharing, err := cp.leaderSell("eth", toSell)
+					if err != nil {
 						panic(err)
 					}
+
+					if profitFromSharing.GreaterThan(decimal.Zero) {
+						fmt.Println("Leader gets ", profitFromSharing.StringFixedBank(8), " shared profit for this sell")
+						totalProfitMade = totalProfitMade.Add(profitFromSharing)
+					}
 				}
-			}*/
+			}
 		}
 
 		marketPrices["btc"] = marketPrices["btc"].Mul(decimal.New(9995+rand.Int63n(10), 0).Div(decimal.New(10000, 0))).Truncate(4)
@@ -94,17 +106,20 @@ func main() {
 		if cnt == iterations/4 {
 			nf := cp.joinNewFollower()
 			cp.followerDepositBase(nf, decimal.New(rand.Int63n(10000)+10, 0))
+			fmt.Println("New follower joined")
 		} else if cnt == iterations/2 {
 			nf := cp.joinNewFollower()
 			cp.followerDepositBase(nf, decimal.New(rand.Int63n(1000)+10, 0))
+			fmt.Println("New follower joined")
 		} else if cnt == iterations*3/4 {
 			nf := cp.joinNewFollower()
 			cp.followerDepositBase(nf, decimal.New(rand.Int63n(100)+10, 0))
+			fmt.Println("New follower joined")
 		}
 		fmt.Println(&cp)
 
 		// check if leader % of portfolio in base always less or equal to that of any follower
-		leaderFrac := cp.leader.baseCurrency.Div(cp.leader.calcTotalPortValue())
+		/*leaderFrac := cp.leader.baseCurrency.Div(cp.leader.calcTotalPortValue())
 		for i := range cp.followers {
 			f := &cp.followers[i]
 
@@ -113,8 +128,10 @@ func main() {
 				fmt.Println("follower base frac:", followerFrac.StringFixedBank(17), "leader base frac:", leaderFrac.StringFixedBank(17), "diff:", leaderFrac.Sub(followerFrac).StringFixedBank(17))
 				panic("Follower " + strconv.Itoa(i) + " broken")
 			}
-		}
+		}*/
 	}
+
+	fmt.Println("All trading done. Follower profit shared with leader:", totalProfitMade.StringFixedBank(4))
 
 	/*if err := cp.leaderBuy("btc", decimal.NewFromFloat(0.5)); err != nil {
 		panic(err)
@@ -179,35 +196,46 @@ func (cp *copyPortfolio) leaderBuy(asset string, amount decimal.Decimal) error {
 		return errInsufficientFunds
 	}
 
-	// Calc fraction of portfolio value going to be moved from base to asset
-	frac := subTotal.Div(cp.leader.calcTotalPortValue())
+	// Calc fractions of base going to be moved from base to asset
+	fracOfBase, fracOfPortfolio := subTotal.Div(cp.leader.baseCurrency), subTotal.Div(cp.leader.calcTotalPortValue())
 
 	cp.leader.buy(asset, amount, totalCost)
-	return cp.followersCopyBuy(asset, frac)
+	return cp.followersCopyBuy(asset, fracOfBase, fracOfPortfolio)
 }
 
-func (cp *copyPortfolio) leaderSell(asset string, amount decimal.Decimal) error {
+// returns profit from followers
+func (cp *copyPortfolio) leaderSell(asset string, amount decimal.Decimal) (decimal.Decimal, error) {
 	if amount.GreaterThan(cp.leader.positions[asset].totalAmount) {
-		return errInsufficientFunds
+		return decimal.Zero, errInsufficientFunds
 	}
 
 	// Calc fraction of asset that is being closed of entire asset position
 	frac := amount.Div(cp.leader.positions[asset].totalAmount)
 
 	cp.leader.sell(asset, amount)
-	profitFromSharing := cp.followersCopySell(asset, frac)
-	if profitFromSharing.GreaterThan(decimal.Zero) {
-		fmt.Println("Leader gets ", profitFromSharing.StringFixedBank(8), " shared profit for this sell")
-	}
-	return nil
+	return cp.followersCopySell(asset, frac), nil
 }
 
-// Buys are done on fraction of total portfolio used (base to asset), not fraction of base used!
-func (cp *copyPortfolio) followersCopyBuy(asset string, fracOfTotalPortfolioValueUsed decimal.Decimal) error {
+// Which way is best?
+// 1 - Just use fracOfBase and move the same ratio of base that the leader did. (Leader might have 1 unit base left, buys a shitcoin, and trades a new followers 10000 base. Not good!)
+// 2 - Trade on fracOfPortfolio, and if higher than what follower has, use all of it.
+// 3 - Trade on fracOfPortfolio, and if higher than what follower has, use fracOfBase.
+func (cp *copyPortfolio) followersCopyBuy(asset string, fracOfBase, fracOfPortfolio decimal.Decimal) error {
 	for i := range cp.followers {
 		f := &cp.followers[i]
 
-		toBuyWith := f.calcTotalPortValue().Mul(fracOfTotalPortfolioValueUsed)
+		// Lets try 3:
+		// With these methods, ratio's can be out of sync no problem,
+		// random deposits & withdrawals (subject to profit sharing fees) can be made at any time,
+		// and profit sharing is simplified by only taking it from base proceeds.
+		var toBuyWith decimal.Decimal
+		fTotalPortValue := f.calcTotalPortValue()
+		if f.baseCurrency.Div(fTotalPortValue).LessThan(fracOfPortfolio) {
+			toBuyWith = f.baseCurrency.Mul(fracOfBase) // use fracOfBase
+		} else {
+			toBuyWith = fTotalPortValue.Mul(fracOfPortfolio) // use fracOfPortfolio
+		}
+
 		amountToBuy := toBuyWith.Div(marketPrices[asset]).Truncate(8)
 
 		subTotal := amountToBuy.Mul(marketPrices[asset])
@@ -238,11 +266,8 @@ func (cp *copyPortfolio) followersCopySell(asset string, fracOfTotalAssetSold de
 				// Assume follower profit split is 80F/20L
 				leaderShare := fGains.Mul(decimal.New(2, -1))
 
-				// calc what to take from follower base and asset
-				ratio := oT.totalAmount.Mul(marketPrices[asset]).Div(f.calcTotalPortValue())
-
-				oT.totalAmount = oT.totalAmount.Sub(ratio.Mul(leaderShare).Div(marketPrices[asset]))
-				f.baseCurrency = f.baseCurrency.Sub((decimal.New(1, 0).Sub(ratio)).Mul(leaderShare))
+				// Just take share from follower base
+				f.baseCurrency = f.baseCurrency.Sub(leaderShare)
 
 				leaderProfit = leaderProfit.Add(leaderShare)
 			}
