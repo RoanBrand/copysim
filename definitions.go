@@ -125,38 +125,32 @@ func (t *trader) buy(asset string, amount, totalCost decimal.Decimal) {
 }
 
 // Low-level sell func
-func (t *trader) sell(asset string, amount decimal.Decimal) {
+// Returns trader's gains, negative or positive
+func (t *trader) sell(asset string, amount decimal.Decimal) decimal.Decimal {
 	pos := t.positions[asset]
 
 	toSell, currentPrice := amount, marketPrices[asset]
-	var profit decimal.Decimal
+	var gains decimal.Decimal
 	for b := pos.buys.Front(); b != nil; b = b.Next() {
 		bu := b.Value.(*buy)
 
 		if toSell.LessThanOrEqual(bu.amount) {
 			cost, got := toSell.Mul(bu.price), toSell.Mul(currentPrice)
-			profit = profit.Add(got.Sub(cost))
+			gains = gains.Add(got.Sub(cost))
 			bu.amount = bu.amount.Sub(toSell)
 			break
 		} else { // have to close this buy and move on to next
 			cost, got := bu.amount.Mul(bu.price), bu.amount.Mul(currentPrice)
-			profit = profit.Add(got.Sub(cost))
+			gains = gains.Add(got.Sub(cost))
 			toSell = toSell.Sub(bu.amount)
 			pos.buys.Remove(b)
 		}
 	}
 
 	pos.totalAmount = pos.totalAmount.Sub(amount)
+
 	got := amount.Mul(currentPrice)
 	proceeds := got.Sub(got.Mul(fee.Sub(decimal.New(1, 0))))
-
-	// share % of profit with leader if > 0, take from follower base
-	// Assume follower profit split is 80F/20L
-	if profit.GreaterThan(decimal.Zero) {
-		leaderShare := profit.Mul(decimal.NewFromFloat(0.2))
-		t.baseCurrency = t.baseCurrency.Add(proceeds.Sub(leaderShare))
-	} else {
-		t.baseCurrency = t.baseCurrency.Add(proceeds)
-	}
-
+	t.baseCurrency = t.baseCurrency.Add(proceeds)
+	return gains
 }
