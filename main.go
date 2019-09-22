@@ -3,11 +3,10 @@ package main
 import (
 	"errors"
 	"fmt"
+	"github.com/shopspring/decimal"
 	"math/rand"
 	"strconv"
 	"time"
-
-	"github.com/shopspring/decimal"
 )
 
 var errInsufficientFunds = errors.New("insufficient funds")
@@ -105,12 +104,11 @@ func main() {
 		fmt.Println(&cp)
 
 		// check if leader % of portfolio in base always less or equal to that of any follower
-		// TODO: Following check doesnt work without truncation, we are accumulating errors somewhere
-		leaderFrac := cp.leader.baseCurrency.Div(cp.leader.calcTotalPortValue()).Truncate(12)
+		leaderFrac := cp.leader.baseCurrency.Div(cp.leader.calcTotalPortValue())
 		for i := range cp.followers {
 			f := &cp.followers[i]
 
-			followerFrac := f.baseCurrency.Div(f.calcTotalPortValue()).Truncate(12)
+			followerFrac := f.baseCurrency.Div(f.calcTotalPortValue())
 			if followerFrac.LessThan(leaderFrac) {
 				fmt.Println("follower base frac:", followerFrac.StringFixedBank(17), "leader base frac:", leaderFrac.StringFixedBank(17), "diff:", leaderFrac.Sub(followerFrac).StringFixedBank(17))
 				panic("Follower " + strconv.Itoa(i) + " broken")
@@ -209,14 +207,16 @@ func (cp *copyPortfolio) followersCopyBuy(asset string, fracOfTotalPortfolioValu
 	for i := range cp.followers {
 		f := &cp.followers[i]
 
-		subTotal := f.calcTotalPortValue().Mul(fracOfTotalPortfolioValueUsed)
+		toBuyWith := f.calcTotalPortValue().Mul(fracOfTotalPortfolioValueUsed)
+		amountToBuy := toBuyWith.Div(marketPrices[asset]).Truncate(8)
+
+		subTotal := amountToBuy.Mul(marketPrices[asset])
 		totalCost := subTotal.Mul(fee)
 
 		if f.baseCurrency.LessThan(totalCost) {
 			return errInsufficientFunds
 		}
 
-		amountToBuy := subTotal.Div(marketPrices[asset])
 		f.buy(asset, amountToBuy, totalCost)
 	}
 
